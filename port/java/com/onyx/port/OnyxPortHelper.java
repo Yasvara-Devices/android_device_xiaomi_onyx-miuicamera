@@ -98,19 +98,25 @@ public final class OnyxPortHelper {
     }
 
     // =========================================================================
-    // 1. Android 17 50MP Full-Frame ImageReader Fix
+    // 1. Android 17 50MP & Pro RAW MockCamera ImageReader Fix
     // =========================================================================
 
     public static ImageReader createImageReader(int width, int height, int format, int maxImages) {
-        if ((format == 0x100 || format == 0x1005 || format == 0x48454946)
-                && (width >= 5000 || height >= 5000)) {
+        boolean isHighResCompressed =
+                (format == 0x100 || format == 0x1005 || format == 0x48454946)
+                        && (width >= 5000 || height >= 5000);
+        boolean isRaw =
+                (format == 0x20 || format == 0x24 || format == 0x25 || format == 0x26);
+        if (isHighResCompressed || isRaw) {
             try {
                 // USAGE_CPU_READ_OFTEN | GRALLOC_USAGE_RENDERSCRIPT -> flexibleConsumer=false
+                // Bypasses SessionConfigurationUtils.roundBufferDimensionNearest() on MockCamera
+                // (prevents 50MP 4.48MB BLOB clamp and RAW16 format=0x20 onConfigureFailed).
                 ImageReader ir = ImageReader.newInstance(width, height, format, maxImages, 0x100003L);
-                Log.i(TAG, "50MP ImageReader usage=0x100003 " + width + "x" + height + " fmt=" + format);
+                Log.i(TAG, "MockCamera ImageReader usage=0x100003 " + width + "x" + height + " fmt=" + format);
                 return ir;
             } catch (Throwable t) {
-                Log.w(TAG, "50MP ImageReader 5-arg fallback", t);
+                Log.w(TAG, "MockCamera ImageReader 5-arg fallback", t);
             }
         }
         return ImageReader.newInstance(width, height, format, maxImages);
@@ -1061,7 +1067,41 @@ public final class OnyxPortHelper {
     }
 
     private static String stripGainMapFromMotionXmp(String xmp) {
-        String s = xmp.replaceAll("(?s)<rdf:li[^>]*>[^<]*?(?:<[^>]+>[^<]*?)*?GainMap(?:[^<]*?<[^>]+>)*?[^<]*?</rdf:li>", "");
+        // Scan <rdf:li ...> entries individually so we never cross </rdf:li> boundaries
+        // and accidentally remove Primary or MotionPhoto items from Container:Directory.
+        StringBuilder sb = new StringBuilder(xmp.length());
+        int pos = 0;
+        int n = xmp.length();
+        while (pos < n) {
+            int liStart = xmp.indexOf("<rdf:li", pos);
+            if (liStart < 0) {
+                sb.append(xmp, pos, n);
+                break;
+            }
+            sb.append(xmp, pos, liStart);
+            int gt = xmp.indexOf('>', liStart);
+            if (gt < 0) {
+                sb.append(xmp, liStart, n);
+                break;
+            }
+            int afterEnd;
+            if (gt > liStart && xmp.charAt(gt - 1) == '/') {
+                afterEnd = gt + 1;
+            } else {
+                int liEnd = xmp.indexOf("</rdf:li>", gt + 1);
+                if (liEnd < 0) {
+                    sb.append(xmp, liStart, n);
+                    break;
+                }
+                afterEnd = liEnd + "</rdf:li>".length();
+            }
+            String item = xmp.substring(liStart, afterEnd);
+            if (!item.contains("GainMap") && !item.contains("hdrgm")) {
+                sb.append(item);
+            }
+            pos = afterEnd;
+        }
+        String s = sb.toString();
         s = s.replaceAll("\\s+hdrgm:[A-Za-z0-9_]+=\"[^\"]*\"", "");
         s = s.replaceAll("\\s+xmlns:hdrgm=\"[^\"]*\"", "");
         return s;

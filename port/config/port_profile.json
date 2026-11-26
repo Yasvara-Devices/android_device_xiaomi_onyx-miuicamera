@@ -6,6 +6,8 @@
   "compat_patches": {
     "compat_global_mod_device": true,
     "compat_disable_safe_check": true,
+    "compat_enable_live_photo": true,
+    "compat_enable_live_ocr": true,
     "compat_obfu_res_fallback": true,
     "compat_stub_jcodec": true,
     "compat_skip_nal_length": true,

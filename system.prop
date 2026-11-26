@@ -19,3 +19,6 @@ ro.miui.build.region=global
 ro.theme_leica=true
 ro.theme_customize=LCC
 camera.debug.safe.check.disable=true
+
+# Live Photo (Motion Photo) bitmask from stock onyx odm/etc/build.prop (bit0=CN, bit1=Global)
+ro.product.camera.livephoto.support=3

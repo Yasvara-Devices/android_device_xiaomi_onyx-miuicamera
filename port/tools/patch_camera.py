@@ -273,6 +273,81 @@ def patch_compat_disable_safe_check(ws: SmaliWorkspace):
     return False, "Anchor camera.debug.safe.check.disable not found"
 
 
+def patch_compat_enable_live_photo(ws: SmaliWorkspace):
+    """
+    Enable native Live Photo (Motion Photo) on AOSP where ro.product.camera.livephoto.support
+    is unset or SELinux-inaccessible (default_prop). Stock Onyx & Nezha odm/etc/build.prop both
+    set ro.product.camera.livephoto.support=3 (bit0=CN, bit1=Global, bit2=0 no RAM reflection).
+    Changes MiLivePhotoUtils fallback default from "0" to "3" while still respecting explicit props.
+    """
+    hits = ws.find_files_containing('"ro.product.camera.livephoto.support"', '"MiLivePhotoUtils"')
+    for p in hits:
+        txt = ws.read(p)
+        pat = re.compile(
+            r'(const-string(?:/jumbo)? ([pv]\d+), "ro\.product\.camera\.livephoto\.support"\s+'
+            r'const-string(?:/jumbo)? ([pv]\d+), )"0"(\s+'
+            r'invoke-static \{\2, \3\}, L[^;]+;->\w+\(Ljava/lang/String;Ljava/lang/String;\)Ljava/lang/String;)'
+        )
+        m = pat.search(txt)
+        if m:
+            new_txt = txt[: m.start()] + m.group(1) + '"3"' + m.group(4) + txt[m.end() :]
+            ws.write(p, new_txt)
+            return True, f"Set Live Photo fallback mask '0' -> '3' in {p.relative_to(ws.root)}"
+        if re.search(r'"ro\.product\.camera\.livephoto\.support"\s+const-string(?:/jumbo)? [pv]\d+, "3"', txt):
+            return True, f"Already enabled Live Photo fallback in {p.relative_to(ws.root)}"
+    return False, "Anchor ro.product.camera.livephoto.support + MiLivePhotoUtils not found"
+
+
+def patch_compat_enable_live_ocr(ws: SmaliWorkspace):
+    """
+    Re-enable on-device Live OCR (powered by /odm/lib64/libmiocr.so + /odm/etc/camera/ocr_aio).
+    Onyx hardware & Common->isSupportOCR() return true and camera.ocr.enabled defaults to true,
+    but DataItemFeature's OCR wrapper gates it on isCNDevice() which compat_global_mod_device
+    disables. Strip only the trailing isCNDevice() check while preserving hardware/prop guards.
+    """
+    ocr_ref = None
+    for p in ws.find_files_containing('"camera.ocr.enabled"'):
+        txt = ws.read(p)
+        m = re.search(
+            r'const-string(?:/jumbo)? (v\d+), "camera\.ocr\.enabled"\s+'
+            r'invoke-static \{\1, v\d+\}, L[^;]+;->\w+\(Ljava/lang/String;Z\)Z\s+'
+            r'move-result (v\d+)\s+'
+            r'sput-boolean \2, (L[^;]+;->\w+:Z)',
+            txt,
+        )
+        if m:
+            ocr_ref = m.group(3)
+            break
+    if not ocr_ref:
+        return False, 'Anchor "camera.ocr.enabled" static field not found'
+
+    txt = ws.read(ws.wrapper_path)
+    mpat = re.compile(
+        r"(\.method public final (\w+)\(\)Z\n)(.*?)(\.end method)",
+        re.M | re.S,
+    )
+    for m in mpat.finditer(txt):
+        body = m.group(3)
+        if ocr_ref not in body:
+            continue
+        cn_pat = re.compile(
+            r"\s*invoke-virtual \{p0\}, "
+            + re.escape(ws.wrapper_cls)
+            + r"->\w+\(\)Z\s+move-result ([pv]\d+)\s+if-eqz \1, :\w+\s*"
+        )
+        cm = cn_pat.search(body)
+        if cm:
+            new_body = body[: cm.start()] + "\n\n    " + body[cm.end() :].lstrip()
+            ws.write(ws.wrapper_path, txt[: m.start()] + m.group(1) + new_body + m.group(4) + txt[m.end() :])
+            return (
+                True,
+                f"Removed CN gate in {ws.wrapper_cls}->{m.group(2)}()Z (anchored via {ocr_ref})",
+            )
+        if re.search(rf"sget-boolean [pv]\d+, {re.escape(ocr_ref)}\s+if-eqz [pv]\d+, :\w+\s+const/4 [pv]\d+, 0x1", body):
+            return True, f"Already enabled Live OCR in {ws.wrapper_cls}->{m.group(2)}()Z"
+    return False, f"No wrapper method referencing {ocr_ref} found in {ws.wrapper_path.name}"
+
+
 def patch_compat_obfu_res_fallback(ws: SmaliWorkspace):
     """Wrap obfu_res/ AssetManager.open() in FileNotFoundException -> ResourcesCompat.getDrawable."""
     hits = ws.find_files_containing('"obfu_res/"', "getValueForDensity", "AssetManager;->open")
@@ -1156,11 +1231,12 @@ def _hook_bool_guard(ws: SmaliWorkspace, path: Path, method_re: str, helper_pred
 
 def patch_compat_fix_50mp_blob_buffer(ws: SmaliWorkspace):
     """
-    Fix Android 17 50MP half-photo truncation (4.48MB clamp in SessionConfigurationUtils):
+    Fix Android 17 50MP half-photo truncation & Pro RAW MockCamera onConfigureFailed:
     Route MockCameraImageReceiver.createCaptureSession()'s ImageReader.newInstance(w,h,fmt,max)
     through OnyxPortHelper.createImageReader() which passes usage=0x100003L
-    (USAGE_CPU_READ_OFTEN | GRALLOC_USAGE_RENDERSCRIPT) for high-res JPEG/HEIF streams,
-    setting flexibleConsumer=false and bypassing roundBufferDimensionNearest().
+    (USAGE_CPU_READ_OFTEN | GRALLOC_USAGE_RENDERSCRIPT) for high-res JPEG/HEIF (>=5000px) and
+    RAW (0x20/0x24/0x25/0x26) streams, setting flexibleConsumer=false and bypassing
+    SessionConfigurationUtils.roundBufferDimensionNearest() on MockCamera.
     """
     ensure_onyx_port_helper(ws)
     hits = ws.find_files_containing('"createCaptureSession: imageFormat: "', "MockCameraImageReceiver")
@@ -2255,6 +2331,8 @@ def patch_version_suffix(root: Path, suffix: str):
 PATCH_FUNCS = {
     "compat_global_mod_device": patch_compat_global_mod_device,
     "compat_disable_safe_check": patch_compat_disable_safe_check,
+    "compat_enable_live_photo": patch_compat_enable_live_photo,
+    "compat_enable_live_ocr": patch_compat_enable_live_ocr,
     "compat_obfu_res_fallback": patch_compat_obfu_res_fallback,
     "compat_stub_jcodec": patch_compat_stub_jcodec,
     "compat_skip_nal_length": patch_compat_skip_nal_length,

@@ -15,16 +15,20 @@ Subcommands:
   find <needle> [--all] [--context N]
                              Search strings/tags/Jacoco keys across smali with enclosing method
                              + auto-annotated Common/Wrapper calls
-  xref <target> [--limit N]  Find all callers/references to a class or method (accepts obfuscated
+  xref <target> [--context N] [--limit N]
+                             Find all callers/references to a class or method (accepts obfuscated
                              LTe/b;->V()Z OR decrypted Common->u4()Z)
   dump <target> [method] [--lines A:B]
                              Print a class, method, or line range with inline deobfuscation
                              (/* Common->foo() */, /* @string/... = "..." */, /* xor="..." */)
   res <query_or_hex> [--callers]
                              Search res/values/strings.xml + public.xml + R$string by keyword or hex ID
+  props [FILTER] [--limit N] Scan system properties (ro.*, vendor.*, persist.*, camera.*, debug.*)
+  jacoco [FILTER]            Search JacocoIgnore keys with Onyx vs Nezha capability resolution
+  vtags [FILTER] [--callers] Search Camera2 vendor tag strings and resolve their static tag fields
   field-writers <Cls->field> Find every sput/iput writing to a field across smali
   prefs <FragmentOrClass>    Summarize preference keys, categories, and Preference methods in a class
-  inspect-jpg <file...>      Safe Python-only JPEG/50MP inspector (size, EXIF, EOI, 4x4 green/black grid)
+  inspect-jpg <file...>      Safe Python-only JPEG/50MP/MotionPhoto/UltraHDR container inspector
   dex-stats                  Exact DEX index pressure (methods/fields/types/strings) per smali* dir
   check-profile [-c PROFILE] Dry-run every resolver in patch_camera.py & print full symbol map
 """
@@ -36,12 +40,17 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
 PORT_ROOT = TOOLS_DIR.parent
-DEFAULT_DEC = PORT_ROOT / "work" / "decompiled_nezha"
+_DEFAULT_DEC_CANDS = [
+    PORT_ROOT / "work" / "decompiled_nezha",
+    Path("/home/ireddragonicy/Data/projects/onyx/nezha-camera-port/work/decompiled_nezha"),
+]
+DEFAULT_DEC = next((p for p in _DEFAULT_DEC_CANDS if p.exists()), _DEFAULT_DEC_CANDS[0])
 DEFAULT_PROFILE = PORT_ROOT / "config" / "port_profile.json"
 
 sys.path.insert(0, str(TOOLS_DIR))
@@ -394,7 +403,6 @@ def cmd_xref(ws: pc.SmaliWorkspace, args):
     print(f"Searching xrefs for: {needle}\n")
     args.needle = needle
     args.all = True
-    args.context = 0
     cmd_find(ws, args)
 
 
@@ -513,6 +521,103 @@ def cmd_prefs(ws: pc.SmaliWorkspace, args):
         print(f"  {m}")
 
 
+def cmd_props(ws: pc.SmaliWorkspace, args):
+    """Scan all system property keys across smali with enclosing method and nearby default."""
+    pat = re.compile(args.filter, re.I) if args.filter else None
+    prop_re = re.compile(r'const-string(?:/jumbo)?\s+[pv]\d+,\s*"((?:ro|persist|vendor|debug|camera|miui|sys|cam)\.[A-Za-z0-9_.-]+)"')
+    hits = defaultdict(list)
+    for p in ws.smali_files:
+        if any(ord(c) > 127 for c in p.name):
+            continue
+        txt = ws.read(p)
+        if not prop_re.search(txt):
+            continue
+        rel = str(p.relative_to(ws.root))
+        lines = txt.splitlines()
+        for i, ln in enumerate(lines):
+            for m in prop_re.finditer(ln):
+                pr = m.group(1)
+                if pat and not pat.search(pr):
+                    continue
+                if len(hits[pr]) < 4:
+                    m_hdr = ""
+                    for j in range(i, max(-1, i - 100), -1):
+                        if lines[j].startswith(".method "):
+                            m_hdr = lines[j].strip().split()[-1]
+                            break
+                    hits[pr].append(f"{rel}:{i + 1} ({m_hdr})")
+    shown = 0
+    for pr in sorted(hits):
+        print(f"  {pr}")
+        for loc in hits[pr]:
+            print(f"      -> {loc}")
+        shown += 1
+        if shown >= args.limit:
+            print(f"... truncated at --limit {args.limit} (total {len(hits)})")
+            return
+    print(f"\nTotal matching properties: {len(hits)}")
+
+
+def cmd_jacoco(ws: pc.SmaliWorkspace, args):
+    """Search JacocoIgnore keys with Onyx vs Nezha resolution."""
+    pat = re.compile(args.filter, re.I) if args.filter else None
+    shown = 0
+    for k in sorted(ws.jacoco_map):
+        if pat and not pat.search(k):
+            continue
+        parts = []
+        for kind, sig in sorted(ws.jacoco_map[k]):
+            if kind == "C":
+                _, ov = eval_simple_value(ws, "com.mi.device.Onyx", sig)
+                _, nv = eval_simple_value(ws, "com.mi.device.Nezha", sig)
+                parts.append(f"C:{sig}(O={ov}, N={nv})")
+            else:
+                cms = ws.resolve_wrapper_to_common(sig)
+                sub = []
+                for cm in cms:
+                    _, ov = eval_simple_value(ws, "com.mi.device.Onyx", cm)
+                    _, nv = eval_simple_value(ws, "com.mi.device.Nezha", cm)
+                    sub.append(f"{cm}(O={ov},N={nv})")
+                sub_s = ", ".join(sub) if sub else "no-common"
+                parts.append(f"W:{sig}->[{sub_s}]")
+        print(f"  {k:44s} : {' ; '.join(parts)}")
+        shown += 1
+        if shown >= args.limit:
+            print(f"... truncated at --limit {args.limit}")
+            break
+    print(f"\nTotal Jacoco keys shown: {shown}")
+
+
+def cmd_vtags(ws: pc.SmaliWorkspace, args):
+    """Search Camera2 vendor tag strings and map to their supplier/holder fields."""
+    pat = re.compile(args.filter, re.I) if args.filter else None
+    tag_re = re.compile(r'const-string(?:/jumbo)?\s+[pv]\d+,\s*"((?:com\.xiaomi|xiaomi|org\.quic|com\.mi\.)[A-Za-z0-9_.-]+)"')
+    found = []
+    for p in ws.smali_files:
+        if any(ord(c) > 127 for c in p.name):
+            continue
+        txt = ws.read(p)
+        if not ("com.xiaomi." in txt or "xiaomi." in txt or "org.quic." in txt or "com.mi." in txt):
+            continue
+        for m in tag_re.finditer(txt):
+            tag = m.group(1)
+            if pat and not pat.search(tag):
+                continue
+            found.append((tag, str(p.relative_to(ws.root)), m.start()))
+    seen = set()
+    shown = 0
+    for tag, rel, _ in sorted(found):
+        if (tag, rel) in seen:
+            continue
+        seen.add((tag, rel))
+        print(f"  {tag:68s} [{rel}]")
+        shown += 1
+        if shown >= args.limit:
+            print(f"... truncated at --limit {args.limit}")
+            break
+    print(f"\nTotal vendor tags shown: {shown}")
+
+
 def _parse_jpeg_header_info(raw: bytes) -> dict:
     info = {
         "size_bytes": len(raw),
@@ -521,6 +626,12 @@ def _parse_jpeg_header_info(raw: bytes) -> dict:
         "width": None,
         "height": None,
         "exif_strings": [],
+        "xmp_xml": "",
+        "has_mpf": False,
+        "has_gainmap": False,
+        "has_motion_photo": False,
+        "mp4_offset": None,
+        "mp4_size": 0,
     }
     i = 2
     n = len(raw)
@@ -542,12 +653,28 @@ def _parse_jpeg_header_info(raw: bytes) -> dict:
         if marker in (0xC0, 0xC1, 0xC2) and len(seg) >= 5:
             info["height"], info["width"] = struct.unpack(">HH", seg[1:5])
         elif marker == 0xE1 and seg.startswith(b"Exif\x00\x00"):
-            # Extract clean ASCII metadata strings (Make/Model/Software/DateTime)
             ascii_hits = re.findall(rb"[ -~]{4,64}", seg)
             info["exif_strings"] = [s.decode("ascii", "ignore") for s in ascii_hits[:12]]
+        elif marker == 0xE1 and seg.startswith(b"http://ns.adobe.com/xap/1.0/\x00"):
+            xmp = seg[29:].decode("utf-8", "ignore")
+            info["xmp_xml"] += xmp
+            if "hdrgm" in xmp or "GainMap" in xmp:
+                info["has_gainmap"] = True
+            if "MotionPhoto" in xmp or "MicroVideo" in xmp:
+                info["has_motion_photo"] = True
+        elif marker == 0xE2 and seg.startswith(b"MPF\x00"):
+            info["has_mpf"] = True
         i += seglen
         if marker == 0xDA:
             break
+    # Locate embedded MP4 ('ftyp' box at +4 bytes) for MotionPhoto / LivePhoto verification
+    ftyp = raw.find(b"ftyp")
+    if ftyp >= 4:
+        box_sz = struct.unpack(">I", raw[ftyp - 4 : ftyp])[0]
+        if 16 <= box_sz <= 128 and raw[ftyp + 4 : ftyp + 8] in (b"mp42", b"isom", b"mp41", b"qt  ", b"M4V ", b"heic", b"mif1"):
+            if ftyp - 4 > 0:
+                info["mp4_offset"] = ftyp - 4
+                info["mp4_size"] = len(raw) - (ftyp - 4)
     return info
 
 
@@ -620,9 +747,26 @@ def cmd_inspect_jpg(args):
         w = info["width"] or (dims_dec[0] if dims_dec else "?")
         h = info["height"] or (dims_dec[1] if dims_dec else "?")
         print(f"=== {p.name} ({info['size_bytes']:,} bytes = {info['size_bytes'] / (1024*1024):.2f} MB) ===")
-        print(f"  Dims={w}x{h}  SOI={info['valid_soi']}  EOI={info['valid_eoi']}")
+        print(f"  Dims={w}x{h}  SOI={info['valid_soi']}  EOI={info['valid_eoi']}  MPF={info['has_mpf']}  GainMap={info['has_gainmap']}  MotionPhoto={info['has_motion_photo']}")
         if info["exif_strings"]:
             print(f"  EXIF={info['exif_strings'][:8]}")
+        if info["xmp_xml"]:
+            tags = re.findall(r'(?:GCamera|Camera|Container|Item|hdrgm):[A-Za-z0-9_]+="[^"]*"', info["xmp_xml"])
+            if tags:
+                print(f"  XMP={tags[:14]}")
+        if info["mp4_offset"] is not None:
+            print(f"  Embedded MP4: offset={info['mp4_offset']:,}  size={info['mp4_size']:,} bytes ({info['mp4_size']/1024:.1f} KB)")
+            ffprobe = shutil.which("ffprobe")
+            if ffprobe:
+                with tempfile.NamedTemporaryFile(suffix=".mp4") as tf:
+                    tf.write(raw[info["mp4_offset"] :])
+                    tf.flush()
+                    pr = subprocess.run(
+                        [ffprobe, "-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,r_frame_rate,nb_frames,duration", "-of", "compact=p=0", tf.name],
+                        capture_output=True, text=True,
+                    )
+                    for sl in pr.stdout.strip().splitlines():
+                        print(f"    MP4 stream: {sl}")
         bad_bands = 0
         if rows:
             for idx, (r, g, b, gp, bp) in enumerate(rows):
@@ -630,7 +774,8 @@ def cmd_inspect_jpg(args):
                 if flag:
                     bad_bands += 1
                 print(f"  Band {idx+1}/4: avgRGB=({r:5.1f},{g:5.1f},{b:5.1f})  green={gp:5.1f}%  black={bp:5.1f}%{flag}")
-        verdict = "PASS (FULL FRAME)" if (info["valid_soi"] and info["valid_eoi"] and bad_bands == 0 and rows) else "FAIL / TRUNCATED"
+        valid_container = info["valid_soi"] and (info["valid_eoi"] or info["mp4_offset"] is not None)
+        verdict = "PASS (FULL FRAME)" if (valid_container and bad_bands == 0 and rows) else "FAIL / TRUNCATED"
         print(f"  VERDICT: {verdict}\n")
 
 
@@ -736,6 +881,7 @@ def main():
 
     p_xref = sub.add_parser("xref", help="Find callers/references to class or class->method")
     p_xref.add_argument("target")
+    p_xref.add_argument("--context", type=int, default=0, help="Lines of annotated context around match")
     p_xref.add_argument("--limit", type=int, default=30)
 
     p_dump = sub.add_parser("dump", help="Dump class, method, or line range with inline deobfuscation comments")
@@ -749,6 +895,18 @@ def main():
     p_res.add_argument("--callers", action="store_true", help="Also list smali files referencing matched IDs")
     p_res.add_argument("--limit", type=int, default=40)
 
+    p_prp = sub.add_parser("props", help="Scan system properties across smali")
+    p_prp.add_argument("filter", nargs="?", default=None)
+    p_prp.add_argument("--limit", type=int, default=60)
+
+    p_jac = sub.add_parser("jacoco", help="Search JacocoIgnore keys with Onyx vs Nezha values")
+    p_jac.add_argument("filter", nargs="?", default=None)
+    p_jac.add_argument("--limit", type=int, default=60)
+
+    p_vt = sub.add_parser("vtags", help="Search Camera2 vendor tag strings")
+    p_vt.add_argument("filter", nargs="?", default=None)
+    p_vt.add_argument("--limit", type=int, default=60)
+
     p_fw = sub.add_parser("field-writers", help="Find every sput/iput writing to a field")
     p_fw.add_argument("target", help="Class->field (e.g. Vr/i->f or Preference->e)")
     p_fw.add_argument("--context", type=int, default=4)
@@ -757,7 +915,7 @@ def main():
     p_pr = sub.add_parser("prefs", help="Summarize preference keys, fields, and methods in a Fragment/class")
     p_pr.add_argument("target")
 
-    p_jpg = sub.add_parser("inspect-jpg", help="Safe Python-only JPEG/50MP frame integrity inspector")
+    p_jpg = sub.add_parser("inspect-jpg", help="Safe Python-only JPEG/50MP/MotionPhoto/UltraHDR container inspector")
     p_jpg.add_argument("files", nargs="+")
 
     sub.add_parser("dex-stats", help="Compute DEX 64K table pressure for every smali* dir")
@@ -781,6 +939,9 @@ def main():
         "find": cmd_find,
         "xref": cmd_xref,
         "dump": cmd_dump,
+        "props": cmd_props,
+        "jacoco": cmd_jacoco,
+        "vtags": cmd_vtags,
         "field-writers": cmd_field_writers,
         "prefs": cmd_prefs,
         "dex-stats": cmd_dex_stats,
