@@ -108,6 +108,7 @@ def build_symbol_map(syms: dict) -> list[tuple[str, str]]:
         ("Lcom/onyx/stub/CamModule;", syms["module_iface"]),
         ("Lcom/onyx/stub/CamManager;", syms["cam_mgr_iface"]),
         ("Lcom/onyx/stub/CamCaps;", syms["caps_cls"]),
+        ("Lcom/onyx/stub/ModuleState;", syms["module_state_cls"]),
         ("Lcom/onyx/stub/RecorderParam;", syms["mrp_cls"]),
         ("Lcom/onyx/stub/StorageWriter;", syms["sw_cls"]),
         # Optional classes (fallback to safe no-op class if absent in a future APK)
@@ -143,13 +144,18 @@ def build_symbol_map(syms: dict) -> list[tuple[str, str]]:
         ("__SYM_ZP_RNG__", syms["zoom_proto_rng_m"]),
         ("__SYM_CM_CAPS__", syms["cam_mgr_caps_m"]),
         ("__SYM_CAPS_MAX__", syms["caps_max_m"]),
-        # Pro Mod MediaRecorderParameter obfuscated fields
+        # Pro Mod MediaRecorderParameter & ModuleState obfuscated fields
+        ("__SYM_CUR_MOD__", syms["module_state_field"]),
         ("__SYM_MRP_ENA_AUD__", syms["mrp_enable_audio"]),
         ("__SYM_MRP_AUD_BR__", syms["mrp_audio_bitrate"]),
         ("__SYM_MRP_AUD_SR__", syms["mrp_audio_sr"]),
+        ("__SYM_MRP_AUD_SRC__", syms["mrp_audio_source"]),
         ("__SYM_MRP_VID_BR__", syms["mrp_video_bitrate"]),
+        ("__SYM_MRP_VID_FPS__", syms["mrp_video_fps"]),
+        ("__SYM_MRP_CAP_RATE__", syms["mrp_capture_rate"]),
         ("__SYM_MRP_MAX_DUR__", syms["mrp_max_duration"]),
         ("__SYM_MRP_MAX_SIZE__", syms["mrp_max_filesize"]),
+        ("__SYM_MRP_EXTRA__", syms["mrp_extra_params"]),
         # StorageWriter (TaskDataStorageWriter) original writeTo method
         ("__SYM_SW_ORIG__", syms["sw_orig_m"]),
         # Fragment title string resource IDs

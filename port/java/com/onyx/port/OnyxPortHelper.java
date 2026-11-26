@@ -30,6 +30,7 @@ import com.android.camera.fragment.watermark.wmSettingV2.WmGalleryPreference;
 import com.onyx.stub.CamCaps;
 import com.onyx.stub.CamManager;
 import com.onyx.stub.CamModule;
+import com.onyx.stub.ModuleState;
 import com.onyx.stub.RecorderParam;
 import com.onyx.stub.StorageWriter;
 import com.onyx.stub.WmDevCache;
@@ -52,6 +53,7 @@ import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Optional;
 import miuix.preference.TextPreference;
@@ -430,6 +432,16 @@ public final class OnyxPortHelper {
         return (p != null) && p.getBoolean("pro_force_mute", false);
     }
 
+    /** True = encode 120/240fps slow-mo as standard 30fps HFR slow-motion (no audio). */
+    public static boolean isSlowMoTrueHfr() {
+        SharedPreferences p = getPrefs();
+        return (p == null) || p.getBoolean("pro_slowmo_hfr", true);
+    }
+
+    public static String slowMoModeLabel(boolean hfr) {
+        return hfr ? "30fps Slow-Mo (Default)" : "Stock HSR (120/240fps + Audio)";
+    }
+
     /** 0 = Off when HDR is Off (Default), 1 = Always Off (SDR only), 2 = Stock (Always On). */
     public static int getUltraHdrMode() {
         SharedPreferences p = getPrefs();
@@ -472,8 +484,40 @@ public final class OnyxPortHelper {
     public static void applyVideoParams(RecorderParam param) {
         if (param == null) return;
         try {
+            int curMod = ModuleState.__SYM_CUR_MOD__;
+            boolean isSlowMo = (curMod == 0xAC);
+            int origMaxDur = param.__SYM_MRP_MAX_DUR__;
+            // Preserve short burst / auto-stop durations (< 60s): 960fps slow-mo (~2.25s),
+            // 480/1920/3840fps, 960_direct (30s), short clips (10s), and Intent durationLimit.
+            boolean isShortBurst = (origMaxDur > 0 && origMaxDur < 60_000);
+
+            // Direct 120/240fps slow-mo (HSR): Xiaomi records real-time 120/240fps + audio
+            // expecting MiuiGallery to slow it down. On AOSP / Google Photos, convert to
+            // standard 30fps HFR slow-motion (4x / 8x) via CCodec InputSurfaceSource stretch.
+            boolean isSlowMoDirect = isSlowMo
+                    && !isShortBurst
+                    && param.__SYM_MRP_ENA_AUD__
+                    && param.__SYM_MRP_CAP_RATE__ >= 119.0
+                    && param.__SYM_MRP_VID_FPS__ >= 119;
+            if (isSlowMoDirect && isSlowMoTrueHfr()) {
+                param.__SYM_MRP_VID_FPS__ = 30;
+                param.__SYM_MRP_ENA_AUD__ = false;
+                param.__SYM_MRP_AUD_SRC__ = -1;
+                ArrayList<String> extras = param.__SYM_MRP_EXTRA__;
+                if (extras != null) {
+                    for (int i = 0; i < extras.size(); i++) {
+                        String entry = extras.get(i);
+                        if (entry != null && entry.startsWith("video-param-i-frames-interval=")) {
+                            extras.set(i, "video-param-i-frames-interval=1.0");
+                        }
+                    }
+                }
+                Log.i(TAG, "applyVideoParams: slow-mo HFR cap=" + param.__SYM_MRP_CAP_RATE__
+                        + " -> 30fps (audio off)");
+            }
+
             int vidMbps = getVideoBitrateMbps();
-            if (vidMbps > 0) {
+            if (vidMbps > 0 && !isSlowMo) {
                 int clamped = Math.max(5, Math.min(500, vidMbps));
                 param.__SYM_MRP_VID_BR__ = clamped * 1_000_000;
             }
@@ -483,13 +527,18 @@ public final class OnyxPortHelper {
                 param.__SYM_MRP_AUD_SR__ = 48_000;
             }
             boolean unlim = isUnlimitedDuration();
-            if (unlim) {
-                param.__SYM_MRP_MAX_DUR__ = -1;
+            if (unlim && !isShortBurst) {
+                if (origMaxDur >= 60_000) {
+                    param.__SYM_MRP_MAX_DUR__ = -1;
+                }
                 param.__SYM_MRP_MAX_SIZE__ = -1L;
             }
-            if (vidMbps > 0 || audKbps > 0 || unlim) {
-                Log.i(TAG, "applyVideoParams: vidMbps=" + vidMbps
-                        + " audKbps=" + audKbps + " maxDur=" + param.__SYM_MRP_MAX_DUR__);
+            if (vidMbps > 0 || audKbps > 0 || unlim || isSlowMo) {
+                Log.i(TAG, "applyVideoParams: mod=" + curMod
+                        + " fps=" + param.__SYM_MRP_VID_FPS__
+                        + " cap=" + param.__SYM_MRP_CAP_RATE__
+                        + " aud=" + param.__SYM_MRP_ENA_AUD__
+                        + " maxDur=" + param.__SYM_MRP_MAX_DUR__);
             }
         } catch (Throwable t) {
             Log.w(TAG, "applyVideoParams failed", t);

@@ -67,6 +67,7 @@ public class ProModSettingsFragment extends b {
         setSummary("pref_pro_aud_br", OnyxPortHelper.audioBitrateLabel(OnyxPortHelper.getAudioBitrateKbps()));
         setSummary("pref_pro_pic_q", OnyxPortHelper.photoQualityLabel(OnyxPortHelper.getPhotoQualityPct()));
         setSummary("pref_pro_ultrahdr", OnyxPortHelper.ultraHdrModeLabel(OnyxPortHelper.getUltraHdrMode()));
+        setSummary("pref_pro_slowmo_hfr", OnyxPortHelper.slowMoModeLabel(OnyxPortHelper.isSlowMoTrueHfr()));
         setSummary("pref_pro_unlim_dur", onOff(OnyxPortHelper.isUnlimitedDuration()));
         setSummary("pref_pro_thermal", onOff(OnyxPortHelper.isBypassThermal()));
         setSummary("pref_pro_battery", onOff(OnyxPortHelper.isBypassLowBattery()));
@@ -80,6 +81,7 @@ public class ProModSettingsFragment extends b {
         addEntry("pref_pro_aud_br", "Audio bitrate (AAC 48 kHz)", "Stock");
         addEntry("pref_pro_pic_q", "Photo JPEG / HEIC quality (%)", "Stock");
         addEntry("pref_pro_ultrahdr", "Ultra HDR (GainMap) mode", "Off when HDR is Off (Default)");
+        addEntry("pref_pro_slowmo_hfr", "Slow-Mo 120/240fps output", "30fps Slow-Mo (Default)");
         addEntry("pref_pro_unlim_dur", "Unlimited video recording duration", "On");
         addEntry("pref_pro_thermal", "Bypass thermal & Slow-Mo overheat limit", "On");
         addEntry("pref_pro_battery", "Bypass low-battery flash & video limit", "On");
@@ -113,6 +115,9 @@ public class ProModSettingsFragment extends b {
                         })
                         .setNegativeButton("Cancel", null)
                         .show();
+                return true;
+            case "pref_pro_slowmo_hfr":
+                toggleBool(p, "pro_slowmo_hfr", true);
                 return true;
             case "pref_pro_unlim_dur":
                 toggleBool(p, "pro_unlimited_dur", true);

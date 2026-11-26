@@ -1024,9 +1024,37 @@ def _discover_port_helper_symbols(ws: SmaliWorkspace) -> dict:
     syms["mrp_enable_audio"] = _mrp_field("MediaRecorderParameter{mEnableAudio=", "Z")
     syms["mrp_audio_bitrate"] = _mrp_field(", mAudioEncodingBitRate=", "I")
     syms["mrp_audio_sr"] = _mrp_field(", mAudioSamplingRate=", "I")
+    syms["mrp_audio_source"] = _mrp_field(", mAudioSource=", "I")
     syms["mrp_video_bitrate"] = _mrp_field(", mVideoEncodingBitRate=", "I")
+    syms["mrp_video_fps"] = _mrp_field(", mVideoFrameRate=", "I")
+    syms["mrp_capture_rate"] = _mrp_field(", mCaptureRate=", "D")
     syms["mrp_max_duration"] = _mrp_field(", mMaxDuration=", "I")
     syms["mrp_max_filesize"] = _mrp_field(", mMaxFileSize=", "J")
+    m_ext = re.search(r"^\.field public (\w+):Ljava/util/ArrayList;\s*$", mrp_txt, re.M)
+    if not m_ext:
+        raise RuntimeError(f"Could not resolve {syms['mrp_cls']} ArrayList extra params field")
+    syms["mrp_extra_params"] = m_ext.group(1)
+
+    # Current active module index static field (e.g. Lcom/android/camera/module/Z;->a:I)
+    ms_hits = ws.find_files_containing('"isSupportFastMotionMode"', "const/16 v1, 0xa9")
+    ms_cls = ms_fld = None
+    for mp in ms_hits:
+        mtxt = ws.read(mp)
+        mc_ms = re.search(r"^\.class[^\n]+(L[^;\s]+;)", mtxt, re.M)
+        if not mc_ms:
+            continue
+        mf_ms = re.search(
+            rf'key = "isSupportFastMotionMode"[\s\S]{{0,240}}?sget v\d+, {re.escape(mc_ms.group(1))}->(\w+):I\s+const/16 v\d+, 0xa9',
+            mtxt,
+        )
+        if mf_ms:
+            ms_cls = mc_ms.group(1)
+            ms_fld = mf_ms.group(1)
+            break
+    if not (ms_cls and ms_fld):
+        raise RuntimeError("Could not resolve current module index static field (isSupportFastMotionMode)")
+    syms["module_state_cls"] = ms_cls
+    syms["module_state_field"] = ms_fld
 
     # 8. TaskDataStorageWriter (Lv7/j;) for Ultra HDR lossless stream filtering
     sw_hits = ws.find_files_containing('"TaskDataStorageWriter"', '"writeTo: imageData is null, write nothing"')
@@ -1552,6 +1580,29 @@ def patch_camera_pro_mod_menu(ws: SmaliWorkspace):
     if rec_hooks == 0:
         return False, "Could not hook any video recorder setMediaRecorderParameter()"
     notes.append(f"videoRecorders({rec_hooks})")
+
+    # 2b. Prevent MediaCodec stop() from throwing IllegalStateException("presentationTimeUs err")
+    #     when slow-mo HFR stretches output PTS (4x/8x) ahead of wall-clock mStopTimeUs.
+    hfr_guard_ok = False
+    for vp in ws.find_files_containing('" pts err, please check "', '" presentationTimeUs err"'):
+        vtxt = ws.read(vp)
+        pat_pts = re.compile(
+            r'(" presentationTimeUs err"[\s\S]{0,400}?invoke-direct \{(v\d+), v\d+\}, Ljava/lang/IllegalStateException;-><init>\(Ljava/lang/String;\)V\s+)throw \2'
+        )
+        if pat_pts.search(vtxt):
+            m_lbl = re.search(r'" stop timeout, mLastOutputBufferPts = "[\s\S]{0,900}?goto (:\w+)', vtxt)
+            if m_lbl:
+                lbl = m_lbl.group(1)
+                vtxt = pat_pts.sub(rf"\1goto {lbl}", vtxt, count=1)
+                ws.write(vp, vtxt)
+                notes.append(f"{vp.stem}.hfrStopGuard({lbl})")
+                hfr_guard_ok = True
+        elif '" presentationTimeUs err"' in vtxt and not re.search(r'" presentationTimeUs err"[\s\S]{0,400}?throw v\d+', vtxt):
+            notes.append(f"{vp.stem}.hfrStopGuard(already)")
+            hfr_guard_ok = True
+        break
+    if not hfr_guard_ok:
+        return False, "Could not install HFR slow-mo PTS stop guard in MediaCodec wrapper"
 
     # 3. Hook PhotoBase.getPhotoQuality(Z)I -> OnyxPortHelper.applyPhotoQuality(moduleIndex, quality)
     pb_hits = [p for p in ws.smali_files if p.name == "PhotoBase.smali"]
