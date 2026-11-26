@@ -1,0 +1,21 @@
+# Copyright (C) 2026 IRedDragonICY
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Google Lens
+ro.com.google.lens.oem_camera_package=com.android.camera
+
+# MiuiCamera
+ro.miui.notch=1
+ro.miui.ui.version.name=V816
+ro.miui.ui.version.code=816
+
+# Beauty presets are keyed by region. Unset, the app falls back to "cn" and asks
+# /odm/etc/camera/beauty_config_gl.json for a CNRegion block that only exists in
+# the cn config, so every scene fails to parse and Beautify offers nothing but
+# Original. onyx is ro.product.mod_device=onyx_global, so say so.
+ro.miui.build.region=global
+
+# Leica theming + skip ported-APK integrity check (Qa/b.Y, F1/V1 security gate)
+ro.theme_leica=true
+ro.theme_customize=LCC
+camera.debug.safe.check.disable=true

@@ -1,0 +1,195 @@
+{
+  "profile_name": "onyx_IRedDragonICY",
+  "target_device": "onyx",
+  "source_device": "nezha",
+  "version_suffix": "_IRedDragonICY",
+  "compat_patches": {
+    "compat_global_mod_device": true,
+    "compat_disable_safe_check": true,
+    "compat_obfu_res_fallback": true,
+    "compat_stub_jcodec": true,
+    "compat_skip_nal_length": true,
+    "compat_google_photos_gallery": true,
+    "compat_fresh_thumbnail": true,
+    "compat_leica_limited_toast": true,
+    "compat_fix_50mp_blob_buffer": true,
+    "compat_fix_ultrahdr_when_hdr_off": true
+  },
+  "leica_leitzphone_patches": {
+    "leitz_force_lcc_theme": true,
+    "leica_cloud_filter_device": true,
+    "leica_cloud_filter_custom_json": true,
+    "smooth_zoom_menu_and_default": true,
+    "camera_pro_mod_menu": true
+  },
+  "watermark_patches": {
+    "watermark_unlock_all": true,
+    "watermark_fix_missing_poco_logos": true,
+    "watermark_fix_gallery_lag": true,
+    "watermark_brand_switcher_menu": true
+  },
+  "onyx_feature_overrides": {
+    "theme_cv_type": {
+      "enabled": true,
+      "type": "int_array",
+      "value": [16],
+      "desc": "Switch camera UI theme from standard (0x11) to Leica CV theme (0x10)"
+    },
+    "support_cv_type": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Enable Leica Authentic/Vibrant photographic styles & 4 Leica shutter sounds"
+    },
+    "leica_watermark_support": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Enable Leica watermark capability (watermark_leica_supported / Te/b.m2)"
+    },
+    "default_shutter_sound_leica": {
+      "enabled": true,
+      "type": "int",
+      "value": 0,
+      "desc": "Default shutter sound index 0 (Leica Default)"
+    },
+    "high_dynamic_color_filter": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "High dynamic color representation from filters"
+    },
+    "support_legendary_mode": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Leica Essential / Legenda Mode (Leica M3 Monopan 50, M9, M10-R)"
+    },
+    "legend_guide_and_capture_prefs": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to w5()Z (MasterLiveModule / Live cinematography) which requires flagship MasterLiveMiviHsrArray HAL support absent on onyx; Leica Essential stays enabled via support_legendary_mode (i5)"
+    },
+    "smooth_zoom_3sat": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Smooth SAT zooming optimization (runtime-controlled by OnyxPortHelper.isSmoothZoomEnabled)"
+    },
+    "smooth_zoom_bar_v2_a": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to B2()Z (Cinemaster / Pro Video HDR10+ flag, not needed by Smooth Zoom Mod)"
+    },
+    "smooth_zoom_bar_v2_b": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to S8()Z (isVideoHdr10OrPlusModeSupported flagship flag; stock onyx already enables Q8()Z for native HDR10)"
+    },
+    "zoom_manager_flagship": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Flagship zoom manager optimization in Photo/Night"
+    },
+    "equip_street_support_a": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: onyx HAL reports supportedfeatures.streetFeatureMask=0 (Fastshot/EquipStreet unsupported)"
+    },
+    "equip_street_support_b": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: onyx HAL reports supportedfeatures.streetFeatureMask=0 (Fastshot/EquipStreet unsupported)"
+    },
+    "street_launch_support": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to N3()Z (StreetModule / Fastshot) which onyx HAL does not support (streetFeatureMask=0)"
+    },
+    "pro_video_custom_lut": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Pro Video custom LUT import (.cube) & Film LUTs (Warm/Cool/Classic/709)"
+    },
+    "pro_video_waveform_histogram": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Pro Video Waveform Graph & Histogram"
+    },
+    "movie_frame_239": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "2.39:1 Anamorphic Movie Frame"
+    },
+    "video_watermark_and_hdr": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to l7()Z (Dolby Vision top-bar + AiAudioTrack), dead on onyx HAL (no DOLBY_CONFIG / no AiAudioTrack)"
+    },
+    "true_colour_video": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to i3()Z (Dolby Vision Video), dead button on onyx HAL (DolbyHDREISSupported=0, VideoHDRSupportFeature=16)"
+    },
+    "cinematic_mode": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to D2()Z (Movie / CinematicModule opmode 0x8032), onyx HAL reports supportedfeatures.cinematic=0"
+    },
+    "dual_video_mode": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Dual Camera / Multi-Cam video mode"
+    },
+    "custom_tint_color": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Custom UI Accent / Tint Color selector"
+    },
+    "ultrapixel_capture_duration": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to B5()Z (isSupport200M) which breaks 50MP IMX882 mode"
+    },
+    "motion_capture_status": {
+      "enabled": true,
+      "type": "bool",
+      "value": true,
+      "desc": "Motion Tracking Capture"
+    },
+    "super_jpeg_quality": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: forces JPEG Quality=100 (all-1s DQT) which overflows onyx 50MP MIVI JPEG buffer (4.48MB truncation)"
+    },
+    "capture_method_prefs": {
+      "enabled": false,
+      "type": "bool",
+      "value": true,
+      "desc": "DISABLED on onyx: resolves to C5()Z (module_name_pixel_xxxm 200MP label)"
+    },
+    "master_lens_cvlens": {
+      "enabled": true,
+      "type": "int",
+      "value": 4,
+      "desc": "Leica Master Lens (CvLens v4: 35mm / 50mm / 75mm / 90mm)"
+    }
+  }
+}

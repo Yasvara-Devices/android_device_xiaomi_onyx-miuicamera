@@ -1,0 +1,5 @@
+# Copyright (C) 2026 IRedDragonICY
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# MIVI HEIC encoder (yuv2Heic / libheichal / AMediaMuxer) memfd buffer.
+type hal_camera_default_tmpfs, file_type;

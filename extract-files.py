@@ -1,0 +1,54 @@
+#!/usr/bin/env -S PYTHONPATH=../../../tools/extract-utils python3
+#
+# Copyright (C) 2026 IRedDragonICY
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+import pathlib
+import subprocess
+import sys
+
+from extract_utils.fixups_blob import (
+    blob_fixup,
+    blob_fixups_user_type,
+)
+from extract_utils.fixups_lib import (
+    lib_fixups,
+)
+from extract_utils.main import (
+    ExtractUtils,
+    ExtractUtilsModule,
+)
+
+namespace_imports = [
+    'device/xiaomi/onyx-miuicamera',
+]
+
+blob_fixups: blob_fixups_user_type = {
+    'system/lib64/libcamera_algoup_jni.xiaomi.so': blob_fixup()
+        .add_needed('libgui_shim_miuicamera.so')
+        .sig_replace('08 AD 40 F9', '08 A9 40 F9'),
+    'system/lib64/libcamera_mianode_jni.xiaomi.so': blob_fixup()
+        .add_needed('libgui_shim_miuicamera.so'),
+    'system/lib64/libmicampostproc_client.so': blob_fixup()
+        .remove_needed('libhidltransport.so'),
+}  # fmt: skip
+
+module = ExtractUtilsModule(
+    'onyx-miuicamera',
+    'xiaomi',
+    blob_fixups=blob_fixups,
+    lib_fixups=lib_fixups,
+    namespace_imports=namespace_imports,
+)
+
+if __name__ == '__main__':
+    utils = ExtractUtils.device(module)
+    utils.run()
+
+    # Re-apply the MiviSettings abort patch on onyx's vendor camera policy lib
+    _patcher = pathlib.Path(__file__).parent / 'patches' / 'patch_micamera_policy.py'
+    _blob = pathlib.Path(__file__).parent / '../../vendor/xiaomi/onyx/proprietary/vendor/lib64/libmicamera_hal_policy.so'
+    if _blob.exists():
+        subprocess.run([sys.executable, str(_patcher), str(_blob.resolve())], check=False)

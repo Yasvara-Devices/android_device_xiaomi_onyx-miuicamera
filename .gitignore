@@ -1,0 +1,13 @@
+#
+# Copyright (C) 2026 IRedDragonICY
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+MiuiCamera/
+port/work/
+port/out/
+port/source/
+port/tools/apktool.jar
+**/__pycache__/
+*.pyc
+*.apk
